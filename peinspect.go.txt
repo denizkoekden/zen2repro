@@ -1,0 +1,87 @@
+package main
+
+import (
+	"debug/pe"
+	"fmt"
+	"os"
+	"sort"
+)
+
+// Characteristics-Bits, die fuer das Paging-Verhalten zaehlen
+const (
+	memExecute = 0x20000000
+	memRead    = 0x40000000
+	memWrite   = 0x80000000
+)
+
+func perm(c uint32) string {
+	s := ""
+	if c&memRead != 0 {
+		s += "R"
+	}
+	if c&memWrite != 0 {
+		s += "W"
+	}
+	if c&memExecute != 0 {
+		s += "X"
+	}
+	if s == "" {
+		s = "-"
+	}
+	return s
+}
+
+func main() {
+	for _, path := range os.Args[1:] {
+		f, err := pe.Open(path)
+		if err != nil {
+			fmt.Printf("%s: %v\n", path, err)
+			continue
+		}
+		fi, _ := os.Stat(path)
+		fmt.Printf("\n=== %s  (%.1f MB auf Platte)\n", path, float64(fi.Size())/1048576)
+		var oh32 *pe.OptionalHeader32
+		var oh64 *pe.OptionalHeader64
+		switch h := f.OptionalHeader.(type) {
+		case *pe.OptionalHeader64:
+			oh64 = h
+		case *pe.OptionalHeader32:
+			oh32 = h
+		}
+		if oh64 != nil {
+			fmt.Printf("SectionAlignment=%d FileAlignment=%d ImageBase=0x%x SizeOfImage=%.1f MB\n",
+				oh64.SectionAlignment, oh64.FileAlignment, oh64.ImageBase, float64(oh64.SizeOfImage)/1048576)
+		} else if oh32 != nil {
+			fmt.Printf("SectionAlignment=%d FileAlignment=%d\n", oh32.SectionAlignment, oh32.FileAlignment)
+		}
+		secs := append([]*pe.Section(nil), f.Sections...)
+		sort.Slice(secs, func(i, j int) bool { return secs[i].VirtualAddress < secs[j].VirtualAddress })
+
+		fmt.Printf("%-10s %-4s %12s %12s %10s %10s\n", "Section", "Perm", "VirtAddr", "VirtSize", "MB", "4K-Seiten")
+		// laengster zusammenhaengender Lauf gleicher Permission
+		bestPerm, bestBytes := "", uint32(0)
+		curPerm, curBytes, curEnd := "", uint32(0), uint32(0)
+		for _, s := range secs {
+			p := perm(s.Characteristics)
+			fmt.Printf("%-10s %-4s %12d %12d %10.1f %10d\n",
+				s.Name, p, s.VirtualAddress, s.VirtualSize, float64(s.VirtualSize)/1048576, (s.VirtualSize+4095)/4096)
+			if p == curPerm && s.VirtualAddress == curEnd {
+				curBytes += s.VirtualSize
+			} else {
+				curPerm, curBytes = p, s.VirtualSize
+			}
+			// naechster Section-Start, auf SectionAlignment gerundet
+			align := uint32(4096)
+			if oh64 != nil {
+				align = oh64.SectionAlignment
+			}
+			curEnd = s.VirtualAddress + ((s.VirtualSize+align-1)/align)*align
+			if curBytes > bestBytes {
+				bestBytes, bestPerm = curBytes, curPerm
+			}
+		}
+		fmt.Printf("-> laengster zusammenhaengender %s-Bereich: %.1f MB = %d aufeinanderfolgende 4K-Seiten\n",
+			bestPerm, float64(bestBytes)/1048576, (bestBytes+4095)/4096)
+		f.Close()
+	}
+}
