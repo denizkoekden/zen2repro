@@ -89,7 +89,7 @@ Installiert waren rclone 1.73.3 (game060) und 1.71.2 (game067). Im `ZEN2SKIP`-Ar
 
 ### Fix
 
-Branch `zen2-preempt-fix` (Commit 453a1bca02, Basis e51216de8e): `CONTEXT_EXCEPTION_REQUEST` beim `GetThreadContext`
+Branch `zen2-preempt-fix` (Commit 22f597afb4, Basis e51216de8e): `CONTEXT_EXCEPTION_REQUEST` beim `GetThreadContext`
 setzen und bei `CONTEXT_EXCEPTION_ACTIVE` nicht injizieren, sysmon versucht es beim naechsten Tick. Cross-Builds fuer
 windows/amd64, arm64 und 386 laufen. Workaround ohne Rebuild: `GODEBUG=asyncpreemptoff=1`.
 
