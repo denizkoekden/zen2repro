@@ -1,5 +1,15 @@
 # zen2repro
 
+**English summary.** Reproducer for the Go crashes on AMD Zen 2 machines running Windows
+([golang/go#79249](https://github.com/golang/go/issues/79249), [golang/go#67108](https://github.com/golang/go/issues/67108)).
+It embeds a 96 MB blob and verifies it in `init()`. Started from a fresh copy of the binary (hard page faults on a new
+image section) it crashes on about a third of the starts on EPYC 7302/7532 with Windows Server 2016; with
+`GODEBUG=asyncpreemptoff=1` it never does. Build with `go run gen/gen.go 96` followed by
+`GOOS=windows GOARCH=amd64 go build -o zen2repro.exe .`, then start a fresh copy of the exe for every run, a warm image
+does not reproduce. The rest of this file is in German and holds the measurements; the numbers are summarized in the
+issue comment and the proposed fix is [CL 828906](https://go.dev/cl/828906).
+
+
 Minimaler Reproducer fuer sporadische Startup-Crashes von Go-Binaries auf AMD Zen 2 unter Windows
 (siehe <https://github.com/golang/go/issues/79249>).
 
