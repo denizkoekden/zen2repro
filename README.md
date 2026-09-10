@@ -9,7 +9,6 @@ image section) it crashes on about a third of the starts on EPYC 7302/7532 with 
 does not reproduce. The rest of this file is in German and holds the measurements; the numbers are summarized in the
 issue comment and the proposed fix is [CL 828906](https://go.dev/cl/828906).
 
-
 Minimaler Reproducer fuer sporadische Startup-Crashes von Go-Binaries auf AMD Zen 2 unter Windows
 (siehe <https://github.com/golang/go/issues/79249>).
 
