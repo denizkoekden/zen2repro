@@ -8,8 +8,10 @@
 // liest dann so lange weiter, bis sich RIP, RSP und die Integer-Register nicht mehr
 // aendern. Die Zeit bis zur letzten Aenderung ist der Nachlauf.
 //
-// Aufruf: suspendlag.exe spin|fault|image [iterationen=2000] [dateigroesse_mb=256]
+// Aufruf: suspendlag.exe spin|fault|image|wait [iterationen=2000] [dateigroesse_mb=256]
 // "image": frische Kopie des eigenen Binaries als SEC_IMAGE mappen und den 96-MB-Blob lesen.
+// "wait": der Worker haengt in Sleep(1), also fast immer in einem blockierenden Syscall.
+// Baut auch fuer 32 Bit (WoW64); -DBLOB_BYTES=8 ergibt ein kleines Binary ohne Image-Modus.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
@@ -26,7 +28,10 @@
 
 // 96 MB Nutzlast im eigenen .rdata, damit eine frische Kopie dieses Binaries als
 // Image-Section dieselben Page Faults liefert wie der Kaltstart des Go-Reproducers.
-static const unsigned char blob[96u << 20] = {1, 2, 3, 4, 5, 6, 7, 8};
+#ifndef BLOB_BYTES
+#define BLOB_BYTES (96u << 20)
+#endif
+static const unsigned char blob[BLOB_BYTES] = {1, 2, 3, 4, 5, 6, 7, 8};
 
 static volatile LONG stop;
 static volatile uint64_t counter;
@@ -46,6 +51,15 @@ static DWORD WINAPI spin_worker(LPVOID p) {
     while (!stop) {
         x += 1;
         counter = x;
+    }
+    return 0;
+}
+
+static DWORD WINAPI wait_worker(LPVOID p) {
+    (void)p;
+    while (!stop) {
+        Sleep(1);
+        counter++;
     }
     return 0;
 }
@@ -144,10 +158,15 @@ typedef struct {
 } stats_t;
 
 static int regs_differ(const CONTEXT *a, const CONTEXT *b) {
+#ifndef _WIN64
+    return a->Eip != b->Eip || a->Esp != b->Esp || a->Eax != b->Eax || a->Ecx != b->Ecx || a->Edx != b->Edx ||
+           a->Ebx != b->Ebx || a->Esi != b->Esi || a->Edi != b->Edi || a->Ebp != b->Ebp;
+#else
     return a->Rip != b->Rip || a->Rsp != b->Rsp || a->Rax != b->Rax || a->Rcx != b->Rcx || a->Rdx != b->Rdx ||
            a->Rbx != b->Rbx || a->Rsi != b->Rsi || a->Rdi != b->Rdi || a->R8 != b->R8 || a->R9 != b->R9 ||
            a->R10 != b->R10 || a->R11 != b->R11 || a->R12 != b->R12 || a->R13 != b->R13 || a->R14 != b->R14 ||
            a->R15 != b->R15;
+#endif
 }
 
 int main(int argc, char **argv) {
@@ -157,12 +176,12 @@ int main(int argc, char **argv) {
     QueryPerformanceFrequency(&qpf);
     bigsize = (uint64_t)mb << 20;
 
-    int fault = strcmp(mode, "fault") == 0, image = strcmp(mode, "image") == 0;
+    int fault = strcmp(mode, "fault") == 0, image = strcmp(mode, "image") == 0, wait = strcmp(mode, "wait") == 0;
     if (fault && !make_bigfile(bigsize)) {
         printf("SUSPENDLAG FEHLER: Datendatei nicht anlegbar\n");
         return 2;
     }
-    HANDLE worker = CreateThread(NULL, 0, image ? image_worker : fault ? fault_worker : spin_worker, NULL, 0, NULL);
+    HANDLE worker = CreateThread(NULL, 0, image ? image_worker : fault ? fault_worker : wait ? wait_worker : spin_worker, NULL, 0, NULL);
     if (!worker) return 2;
     Sleep(fault || image ? 1500 : 100);
     double maxwait = (image || fault) ? 300.0 : 2500.0;
@@ -230,9 +249,9 @@ int main(int argc, char **argv) {
     WaitForSingleObject(worker, 10000);
     if (fault) DeleteFileA(bigpath);
 
-    printf("SUSPENDLAG mode=%s n=%u reporting=%u excactive=%u svcactive=%u noreport=%u | moved=%u (exc=%u svc=%u plain=%u noreport=%u) "
+    printf("SUSPENDLAG bits=%d mode=%s n=%u reporting=%u excactive=%u svcactive=%u noreport=%u | moved=%u (exc=%u svc=%u plain=%u noreport=%u) "
            "lag<=10us=%u <=100us=%u <=1000us=%u >1000us=%u still@5ms=%u lagmax=%.0fus | readmax=%.0fus\n",
-           mode, s.n, s.rep, s.exc, s.svc, s.noreport, s.moved, s.moved_exc, s.moved_svc, s.moved_plain, s.moved_noreport,
+           (int)(sizeof(void *) * 8), mode, s.n, s.rep, s.exc, s.svc, s.noreport, s.moved, s.moved_exc, s.moved_svc, s.moved_plain, s.moved_noreport,
            s.lag10, s.lag100, s.lag1000, s.lagmore, s.still, s.lagmax_us, s.readmax_us);
     return 0;
 }
